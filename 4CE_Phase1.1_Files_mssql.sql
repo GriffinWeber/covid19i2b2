@@ -206,7 +206,7 @@ insert into #severe_patients
 		--Insertion of endotracheal tube
 		or f.concept_cd in ('PROC|ICD10:0BH17EZ','PROC|ICD9:96.04')
 		--Invasive mechanical ventilation
-		or f.concept_cd like 'PROC|ICD10:5A09%'
+		or f.concept_cd like 'PROC|ICD10:5A09[345]%'
 		or f.concept_cd like 'PROC|ICD9:96.7[012]'
 	group by f.patient_num
 -- Update the covid_cohort table to flag severe patients 
