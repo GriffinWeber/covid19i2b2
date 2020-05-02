@@ -1,6 +1,6 @@
 --##############################################################################
 --### 4CE Phase 1.1
---### Date: April 30, 2020
+--### Date: May 1, 2020
 --### Database: Microsoft SQL Server
 --### Data Model: i2b2
 --### Created By: Griffin Weber (weber@hms.harvard.edu)
@@ -638,11 +638,14 @@ update #Medications
 		num_patients_ever_severe_since_admission = (case when num_patients_ever_severe_since_admission<10 then -99 else num_patients_ever_severe_since_admission end)
 
 --------------------------------------------------------------------------------
--- Set demographic totals equal to "-999" to protect obfuscated breakdowns.
+-- To protect obfuscated demographics breakdowns, keep individual sex, age,
+--   and race breakdowns, set combinations and the total count to -999.
 --------------------------------------------------------------------------------
 update #Demographics
 	set num_patients_all = -999, num_patients_ever_severe = -999
-	where sex='all' or age_group='all' or race='all'
+	where (case sex when 'all' then 1 else 0 end)
+		+(case race when 'all' then 1 else 0 end)
+		+(case age_group when 'all' then 1 else 0 end)<>2
 
 --------------------------------------------------------------------------------
 -- Delete small counts.
