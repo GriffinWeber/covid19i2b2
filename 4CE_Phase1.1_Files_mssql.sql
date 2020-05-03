@@ -495,7 +495,7 @@ insert into #Labs
 				and f.nval_num is not null
 				and f.nval_num >= 0
 				and f.start_date >= p.admission_date
-				and l.local_lab_code not in ('2019-8','2703-7')
+				and l.loinc not in ('2019-8','2703-7')
 		) t
 		group by loinc, lab_units, patient_num, severe, days_since_admission
 	) t
