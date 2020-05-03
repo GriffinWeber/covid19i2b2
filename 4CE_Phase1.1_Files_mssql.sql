@@ -27,7 +27,7 @@ alter table #covid_pos_patients add primary key (patient_num, covid_pos_date)
 insert into #covid_pos_patients
 	select patient_num, cast(min(start_date) as date) covid_pos_date
 	from observation_fact
-	where concept_cd = 'LAB|LOINC:COVID19POS'
+	where concept_cd = 'LOINC:COVID19POS'
 	group by patient_num
 
 --------------------------------------------------------------------------------
@@ -120,7 +120,7 @@ insert into #lab_mapping
 	--union select '2703-7','third-code','1','mmHg','PaO2'
 
 -- Add a local prefix to your codes (optional)
-update #lab_mapping set local_lab_code = 'LAB|LOINC:'+local_lab_code
+update #lab_mapping set local_lab_code = 'LOINC:'+local_lab_code
 
 --------------------------------------------------------------------------------
 -- Create a list of medications and local codes.
@@ -170,8 +170,8 @@ insert into #med_mapping
 	) t
 
 -- Convert the medication code to your local format (optional)
-update #med_mapping set local_med_code = 'MED|ATC:'+local_med_code where code_type='ATC'
-update #med_mapping set local_med_code = 'MED|RXCUI:'+local_med_code where code_type='RxNorm'
+update #med_mapping set local_med_code = 'ATC:'+local_med_code where code_type='ATC'
+update #med_mapping set local_med_code = 'RXNORM:'+local_med_code where code_type='RxNorm'
 
 
 --******************************************************************************
@@ -199,15 +199,15 @@ insert into #severe_patients
 		f.concept_cd in (select local_lab_code from #lab_mapping where loinc in ('2019-8','2703-7'))
 		-- Any severe medication
 		or f.concept_cd in (select local_med_code from #med_mapping where med_class in ('SIANES','SICARDIAC'))
-		--Acute respiratory distress syndrome
-		or f.concept_cd in ('DIAG|ICD10:J80','DIAG|ICD9:518.82')
-		--Ventilator associated pneumonia
-		or f.concept_cd in ('DIAG|ICD10:J95.851','DIAG|ICD9:997.31')
-		--Insertion of endotracheal tube
-		or f.concept_cd in ('PROC|ICD10:0BH17EZ','PROC|ICD9:96.04')
-		--Invasive mechanical ventilation
-		or f.concept_cd like 'PROC|ICD10:5A09[345]%'
-		or f.concept_cd like 'PROC|ICD9:96.7[012]'
+		-- Acute respiratory distress syndrome (diagnosis)
+		or f.concept_cd in ('ICD10CM:J80','ICD9CM:518.82')
+		-- Ventilator associated pneumonia (diagnosis)
+		or f.concept_cd in ('ICD10CM:J95.851','ICD9CM:997.31')
+		-- Insertion of endotracheal tube (procedure)
+		or f.concept_cd in ('ICD10PCS:0BH17EZ','ICD9PROC:96.04')
+		-- Invasive mechanical ventilation (procedure)
+		or f.concept_cd like 'ICD10PCS:5A09[345]%'
+		or f.concept_cd like 'ICD9PROC:96.7[012]'
 	group by f.patient_num
 -- Update the covid_cohort table to flag severe patients 
 update c
@@ -526,8 +526,8 @@ insert into #Diagnoses
 		sum(severe*since_admission)
 	from (
 		select distinct f.concept_cd, 
-			left(replace(replace(concept_cd,'DIAG|ICD10:',''),'DIAG|ICD9:',''),3) icd_code_3chars,
-			(case when concept_cd like 'DIAG|ICD10:%' then 10 else 9 end) icd_version,
+			left(replace(replace(concept_cd,'ICD10CM:',''),'ICD9CM:',''),3) icd_code_3chars,
+			(case when concept_cd like 'ICD10CM:%' then 10 else 9 end) icd_version,
 			p.patient_num, p.severe, 
 			(case when f.start_date <= dateadd(dd,-15,p.admission_date) then 1 else 0 end) before_admission,
 			(case when f.start_date >= p.admission_date then 1 else 0 end) since_admission
@@ -535,7 +535,7 @@ insert into #Diagnoses
 			inner join #covid_cohort p 
 				on f.patient_num=p.patient_num 
 					and f.start_date >= dateadd(dd,-365,p.admission_date)
-		where concept_cd like 'DIAG|ICD%'
+		where concept_cd like 'ICD%'
 	) t
 	group by icd_code_3chars, icd_version
 
@@ -672,12 +672,12 @@ delete from #Medications where num_patients_all_before_admission<10 and num_pati
 -- * It must start with a letter.
 -- * It cannot have any blank spaces or special characters.
 --------------------------------------------------------------------------------
-update #DailyCounts set siteid = 'BIDMC'
-update #ClinicalCourse set siteid = 'BIDMC'
-update #Demographics set siteid = 'BIDMC'
-update #Labs set siteid = 'BIDMC'
-update #Diagnoses set siteid = 'BIDMC'
-update #Medications set siteid = 'BIDMC'
+update #DailyCounts set siteid = 'YOURSITEID'
+update #ClinicalCourse set siteid = 'YOURSITEID'
+update #Demographics set siteid = 'YOURSITEID'
+update #Labs set siteid = 'YOURSITEID'
+update #Diagnoses set siteid = 'YOURSITEID'
+update #Medications set siteid = 'YOURSITEID'
 
 --------------------------------------------------------------------------------
 -- OPTION #1: View the data as tables.
@@ -705,14 +705,14 @@ select s DailyCountsCSV
 		union all 
 		select row_number() over (order by calendar_date) i,
 			siteid
-			+','+cast(calendar_date as varchar(50))
+			+','+convert(varchar(50),calendar_date,23) --YYYY-MM-DD
 			+','+cast(cumulative_patients_all as varchar(50))
 			+','+cast(cumulative_patients_severe as varchar(50))
 			+','+cast(cumulative_patients_dead as varchar(50))
 			+','+cast(num_patients_in_hospital_on_this_date as varchar(50))
 			+','+cast(num_patients_in_hospital_and_severe_on_this_date as varchar(50))
 		from #DailyCounts
-		union all select 9999999, ''
+		union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 	) t
 	order by i
 
@@ -727,7 +727,7 @@ select s ClinicalCourseCSV
 			+','+cast(num_patients_all_still_in_hospital as varchar(50))
 			+','+cast(num_patients_ever_severe_still_in_hospital as varchar(50))
 		from #ClinicalCourse
-		union all select 9999999, ''
+		union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 	) t
 	order by i
 
@@ -744,7 +744,7 @@ select s DemographicsCSV
 			+','+cast(num_patients_all as varchar(50))
 			+','+cast(num_patients_ever_severe as varchar(50))
 		from #Demographics
-		union all select 9999999, ''
+		union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 	) t
 	order by i
 
@@ -771,7 +771,7 @@ select s LabsCSV
 			+','+cast(mean_log_value_ever_severe as varchar(50))
 			+','+cast(stdev_log_value_ever_severe as varchar(50))
 		from #Labs
-		union all select 9999999, ''
+		union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 	) t
 	order by i
 
@@ -791,7 +791,7 @@ select s DiagnosesCSV
 			+','+cast(num_patients_ever_severe_before_admission as varchar(50))
 			+','+cast(num_patients_ever_severe_since_admission as varchar(50))
 		from #Diagnoses
-		union all select 9999999, ''
+		union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 	) t
 	order by i
 
@@ -810,7 +810,7 @@ select s MedicationsCSV
 			+','+cast(num_patients_ever_severe_before_admission as varchar(50))
 			+','+cast(num_patients_ever_severe_since_admission as varchar(50))
 		from #Medications
-		union all select 9999999, ''
+		union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 	) t
 	order by i
 
