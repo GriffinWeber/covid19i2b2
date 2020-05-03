@@ -1,6 +1,6 @@
 --##############################################################################
 --### 4CE Phase 1.1
---### Date: May 1, 2020
+--### Date: May 3, 2020
 --### Database: Microsoft SQL Server
 --### Data Model: i2b2
 --### Created By: Griffin Weber (weber@hms.harvard.edu)
@@ -310,6 +310,8 @@ insert into #Demographics_temp (patient_num, age_group)
 	from patient_dimension
 	where patient_num in (select patient_num from #covid_cohort)
 -- Get patient's race(s)
+-- Skip this query if your institution does not collect race or ethnicity,
+--   but still run the next query, which sets missing race to "other".
 insert into #Demographics_temp (patient_num, race)
 	select patient_num,
 		(case
