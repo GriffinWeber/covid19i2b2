@@ -77,7 +77,7 @@ insert into  COVID_CODE_MAP
 	select 'inpatient', 'I' from dual
         union all 
     select 'inpatient', 'IN' from dual;
-    --UNC: 'INPATIENT'
+
 commit;    
 -- Sex (patient_dimension.sex_cd)
 insert into  COVID_CODE_MAP
@@ -105,7 +105,6 @@ insert into  COVID_CODE_MAP
         union all 
     select 'white', 'W' from dual;
 commit; 
---UNC: white:'1', islander:'5', black:'2',asian:'4',native:'3'
 
 -- Hispanic/Latino (field based on covid_config.hispanic_in_fact_table; ignore if you don't collect race/ethnicity)
 insert into  COVID_CODE_MAP
@@ -113,7 +112,6 @@ insert into  COVID_CODE_MAP
         union all 
     select 'hispanic_latino', 'DEM|HISPANIC:Y' from dual;
 commit; 
---UNC: HISP:'2',No:'1'
 
 -- Codes that indicate a positive COVID-19 test result (use either option #1 and/or option #2)
 -- COVID-19 Positive Option #1: individual concept_cd values
@@ -459,8 +457,7 @@ begin
                     case when p.death_date > coalesce(severe_date,admission_date) 
                     then p.death_date 
                     else coalesce(severe_date,admission_date) end
-                from covid_cohort c
-                   inner join patient_dimension p on p.patient_num = c.patient_num
+                from patient_dimension p where p.patient_num = c.patient_num
             )
             where exists (select c.patient_num from patient_dimension p where p.patient_num = c.patient_num and (p.death_date is not null or p.vital_status_cd in ('Y'))); 
         commit;
@@ -468,10 +465,9 @@ begin
         update covid_cohort c
             set c.death_date = (
                 select max(f.start_date) death_date
-                from covid_cohort p
-                   inner join observation_fact f
-                      on f.patient_num = p.patient_num
-                where p.death_date is not null and f.start_date > p.death_date
+                from  observation_fact f
+                where f.patient_num = c.patient_num
+                	and c.death_date is not null and f.start_date > c.death_date
             )
             where c.death_date is not null; 
         commit;
@@ -622,7 +618,7 @@ insert into covid_demographics_temp (patient_num, sex, age_group, race)
 -- Create DailyCounts table.
 --------------------------------------------------------------------------------
 create table covid_daily_counts (
-	siteid varchar(50) not null,
+	siteid varchar(50) not null default '@',
 	calendar_date date not null,
 	cumulative_patients_all numeric(8,0),
 	cumulative_patients_severe numeric(8,0),
@@ -669,7 +665,7 @@ update covid_daily_counts
 -- Create ClinicalCourse table.
 --------------------------------------------------------------------------------
 create table covid_clinical_course (
-	siteid varchar(50) not null,
+	siteid varchar(50) not null default '@',
 	days_since_admission int not null,
 	num_pat_all_cur_in_hosp numeric(8,0),  --num_patients_all_still_in_hospital: shortened to under 128 bytes
 	num_pat_ever_severe_cur_hosp numeric(8,0),  --num_patients_ever_severe_still_in_hospital: shortened to under 128 bytes
@@ -680,7 +676,7 @@ insert into covid_clinical_course
 		count(*),
 		sum(severe)
 	from (
-		select distinct trunc(c.admission_date)-trunc(d.d) days_since_admission, 
+		select distinct trunc(d.d)-trunc(c.admission_date) days_since_admission, 
 			c.patient_num, severe
 		from covid_date_list_temp d
 			inner join covid_admissions p
@@ -695,7 +691,7 @@ insert into covid_clinical_course
 -- Create Demographics table.
 --------------------------------------------------------------------------------
 create table covid_demographics (
-	siteid varchar(50) not null,
+	siteid varchar(50) not null default '@',
 	sex varchar(10) not null,
 	age_group varchar(20) not null,
 	race varchar(30) not null,
@@ -732,7 +728,7 @@ update covid_demographics
 -- Create Labs table.
 --------------------------------------------------------------------------------
 create table covid_labs (
-	siteid varchar(50) not null,
+	siteid varchar(50) not null default '@',
 	loinc varchar(20) not null,
 	days_since_admission int not null,
 	units varchar(20),
@@ -766,7 +762,7 @@ insert into covid_labs
 			avg(ln(val+0.5)) logval -- natural log (ln), not log base 10
 		from (
 			select l.loinc, l.lab_units, f.patient_num, p.severe,
-				trunc(p.admission_date) - trunc(f.start_date) days_since_admission,
+				trunc(f.start_date) - trunc(p.admission_date) days_since_admission,
 				f.nval_num*l.scale_factor val
 			from observation_fact f
 				inner join covid_cohort p 
@@ -791,7 +787,7 @@ insert into covid_labs
 -- * Customize this query if your ICD codes do not have a prefix.
 --------------------------------------------------------------------------------
 create table covid_diagnoses (
-	siteid varchar(50) not null,
+	siteid varchar(50) not null default '@',
 	icd_code_3chars varchar(10) not null,
 	icd_version int not null,
 	num_pat_all_before_admission numeric(8,0), --NUM_PATIENTS_ALL_BEFORE_ADMISSION: shortened to under 128 bytes
@@ -817,7 +813,7 @@ insert into covid_diagnoses
 			inner join covid_cohort p 
 				on f.patient_num=p.patient_num 
 					and f.start_date >= (trunc(p.admission_date)-365)
-		where concept_cd like code_prefix_icd9cm||'%' and code_prefix_icd9cm <> ''
+		where concept_cd like x.code_prefix_icd9cm||'%' and length(x.code_prefix_icd9cm)>0
 		-- ICD10
 		union all
 		select distinct p.patient_num, p.severe, 10 icd_version,
@@ -829,7 +825,7 @@ insert into covid_diagnoses
 			inner join covid_cohort p 
 				on f.patient_num=p.patient_num 
 					and f.start_date >= (trunc(p.admission_date)-365)
-		where concept_cd like code_prefix_icd10cm||'%' and code_prefix_icd10cm <> ''
+		where concept_cd like x.code_prefix_icd10cm||'%' and length(x.code_prefix_icd10cm)>0
 	) t
 	group by icd_code_3chars, icd_version;
 commit;    
@@ -838,7 +834,7 @@ commit;
 -- Create Medications table.
 --------------------------------------------------------------------------------
 create table covid_medications (
-	siteid varchar(50) not null,
+	siteid varchar(50) not null default '@',
 	med_class varchar(20) not null,
 	num_pat_all_before_admission numeric(8,0),
 	num_pat_all_since_admission numeric(8,0),
@@ -1052,7 +1048,7 @@ begin
         select s DailyCountsCSV
             from (
                 select 0 i, 'siteid,calendar_date,cumulative_patients_all,cumulative_patients_severe,cumulative_patients_dead,'
-                    +'num_pat_in_hosp_on_date,num_pat_in_hospsevere_on_date' s from dual
+                    ||'num_pat_in_hosp_on_date,num_pat_in_hospsevere_on_date' s from dual
                 union all 
                 select row_number() over (order by calendar_date) i,
                     siteid
@@ -1104,8 +1100,8 @@ begin
         select s LabsCSV
             from (
                 select 0 i, 'siteid,loinc,days_since_admission,units,'
-                    +'num_patients_all,mean_value_all,stdev_value_all,mean_log_value_all,stdev_log_value_all,'
-                    +'num_patients_ever_severe,mean_value_ever_severe,STDEV_VALUE_EVER_SEVERE,mean_log_value_ever_severe,stdev_log_value_ever_severe' s
+                    ||'num_patients_all,mean_value_all,stdev_value_all,mean_log_value_all,stdev_log_value_all,'
+                    ||'num_patients_ever_severe,mean_value_ever_severe,STDEV_VALUE_EVER_SEVERE,mean_log_value_ever_severe,stdev_log_value_ever_severe' s
                 union all 
                 select row_number() over (order by loinc, days_since_admission) i,
                     siteid
@@ -1131,8 +1127,8 @@ begin
         select s DiagnosesCSV
             from (
                 select 0 i, 'siteid,icd_code_3chars,icd_version,'
-                    +'num_pat_all_before_admission,num_pat_all_since_admission,'
-                    +'num_pat_ever_severe_before_adm,num_pat_ever_severe_since_adm' s
+                    ||'num_pat_all_before_admission,num_pat_all_since_admission,'
+                    ||'num_pat_ever_severe_before_adm,num_pat_ever_severe_since_adm' s
                 union all 
                 select row_number() over (order by num_pat_all_since_admission desc, num_pat_all_before_admission desc) i,
                     siteid
@@ -1151,8 +1147,8 @@ begin
         select s MedicationsCSV
             from (
                 select 0 i, 'siteid,med_class,'
-                    +'num_pat_all_before_admission,num_pat_all_since_admission,'
-                    +'num_pat_ever_severe_before_adm,num_pat_ever_severe_since_adm' s
+                    ||'num_pat_all_before_admission,num_pat_all_since_admission,'
+                    ||'num_pat_ever_severe_before_adm,num_pat_ever_severe_since_adm' s
                 union all 
                 select row_number() over (order by num_pat_all_since_admission desc, num_pat_all_before_admission desc) i,
                     siteid
@@ -1162,7 +1158,7 @@ begin
                     ||','||cast(num_pat_ever_severe_before_adm as varchar(50))
                     ||','||cast(num_pat_ever_severe_since_adm as varchar(50))
                 from covid_medications
-                union all select 9999999, ''from dual --Add a blank row to make sure the last line in the file with data ends with a line feed.
+                union all select 9999999, '' from dual --Add a blank row to make sure the last line in the file with data ends with a line feed.
             ) t
             order by i;
 /*    end if;
