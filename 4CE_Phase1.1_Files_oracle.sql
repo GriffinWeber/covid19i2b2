@@ -1,23 +1,16 @@
 
---Cleanup scripts if necessary
-/*
-  drop table covid_config;
-  drop table covid_code_map;
-  drop table covid_lab_map;
-  drop table covid_med_map;
-  drop table covid_date_list_temp;
-  drop table covid_demographics_temp;
-  drop table covid_admissions;
-  drop table covid_pos_patients;
-  drop table covid_cohort;
-  drop table covid_severe_patients;
-  drop table covid_demographics;
-  drop table covid_daily_counts;
-  drop table covid_clinical_course;
-  drop table covid_labs;
-  drop table covid_medications;
-  drop table covid_diagnoses;
-*/
+--##############################################################################
+--### 4CE Phase 1.1
+--### Date: May 6, 2020
+--### Database: Oracle
+--### Data Model: i2b2
+--### Original MSSQL Created By: Griffin Weber (weber@hms.harvard.edu)
+--### 	 Original:https://github.com/GriffinWeber/covid19i2b2/blob/master/4CE_Phase1.1_Files_mssql.sql
+--###	 commit 64d83bd69c1a4d856c5150c08516d288afce1fb5
+--### Adapted to Oracle by: Robert Bradford (UNC-CH) [rbrad@med.unc.edu]
+--##############################################################################
+
+
 --------------------------------------------------------------------------------
 -- General settings
 --------------------------------------------------------------------------------
@@ -1047,7 +1040,7 @@ begin
         -- DailyCounts
         select s DailyCountsCSV
             from (
-                select 0 i, 'siteid,calendar_date,cumulative_patients_all,cumulative_patients_severe,cumulative_patients_dead'
+                select 0 i, 'siteid,calendar_date,cumulative_patients_all,cumulative_patients_severe,cumulative_patients_dead',
                     ||'num_patients_in_hospital_on_this_date,num_patients_in_hospital_and_severe_on_this_date' s from dual
                 union all 
                 select row_number() over (order by calendar_date) i,
@@ -1169,8 +1162,12 @@ begin
 /*    end if;
 end*/
 
-/* Oracle scripts based on:
-  https://github.com/GriffinWeber/covid19i2b2/blob/master/4CE_Phase1.1_Files_mssql.sql
-  commit 64d83bd69c1a4d856c5150c08516d288afce1fb5
-Adapted to Oracle by Robert Bradford (UNC-CH) [rbrad@med.unc.edu]
+--------------------------------------------------------------------------------
+-- Cleanup Scripts (If Necessary)
+--------------------------------------------------------------------------------
+/*
+  drop table covid_config;  drop table covid_code_map;  drop table covid_lab_map;  drop table covid_med_map;  drop table covid_date_list_temp;
+  drop table covid_demographics_temp;  drop table covid_admissions;  drop table covid_pos_patients;  drop table covid_cohort;
+  drop table covid_severe_patients;  drop table covid_demographics;  drop table covid_daily_counts;  drop table covid_clinical_course;
+  drop table covid_labs;  drop table covid_medications;  drop table covid_diagnoses;
 */
