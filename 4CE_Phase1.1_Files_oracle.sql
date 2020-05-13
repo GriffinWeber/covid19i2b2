@@ -1047,8 +1047,8 @@ begin
         -- DailyCounts
         select s DailyCountsCSV
             from (
-                select 0 i, 'siteid,calendar_date,cumulative_patients_all,cumulative_patients_severe,cumulative_patients_dead,'
-                    ||'num_pat_in_hosp_on_date,num_pat_in_hospsevere_on_date' s from dual
+                select 0 i, 'siteid,calendar_date,cumulative_patients_all,cumulative_patients_severe,cumulative_patients_dead'
+                    ||'num_patients_in_hospital_on_this_date,num_patients_in_hospital_and_severe_on_this_date' s from dual
                 union all 
                 select row_number() over (order by calendar_date) i,
                     siteid
@@ -1067,7 +1067,7 @@ begin
         -- ClinicalCourse
         select s ClinicalCourseCSV
             from (
-                select 0 i, 'siteid,days_since_admission,num_pat_all_cur_in_hosp,num_pat_ever_severe_cur_hosp' s
+                select 0 i, 'siteid,days_since_admission,num_patients_all_still_in_hospital,num_patients_ever_severe_still_in_hospital' s from dual
                 union all 
                 select row_number() over (order by days_since_admission) i,
                     siteid
@@ -1075,14 +1075,15 @@ begin
                     ||','||cast(num_pat_all_cur_in_hosp as varchar(50))
                     ||','||cast(num_pat_ever_severe_cur_hosp as varchar(50))
                 from covid_clinical_course
-                union all select 9999999, '' from dual--Add a blank row to make sure the last line in the file with data ends with a line feed.
+                union all 
+                select 9999999, '' from dual--Add a blank row to make sure the last line in the file with data ends with a line feed.
             ) t
             order by i;
     
         -- Demographics
         select s DemographicsCSV
             from (
-                select 0 i, 'siteid,sex,age_group,race,num_patients_all,num_patients_ever_severe' s
+                select 0 i, 'siteid,sex,age_group,race,num_patients_all,num_patients_ever_severe' s from dual
                 union all 
                 select row_number() over (order by sex, age_group, race) i,
                     siteid
@@ -1101,7 +1102,9 @@ begin
             from (
                 select 0 i, 'siteid,loinc,days_since_admission,units,'
                     ||'num_patients_all,mean_value_all,stdev_value_all,mean_log_value_all,stdev_log_value_all,'
-                    ||'num_patients_ever_severe,mean_value_ever_severe,STDEV_VALUE_EVER_SEVERE,mean_log_value_ever_severe,stdev_log_value_ever_severe' s
+                    ||'num_patients_ever_severe,mean_value_ever_severe,stdev_value_ever_severe,mean_log_value_ever_severe,stdev_log_value_ever_severe' s
+                from dual    
+
                 union all 
                 select row_number() over (order by loinc, days_since_admission) i,
                     siteid
@@ -1127,8 +1130,9 @@ begin
         select s DiagnosesCSV
             from (
                 select 0 i, 'siteid,icd_code_3chars,icd_version,'
-                    ||'num_pat_all_before_admission,num_pat_all_since_admission,'
-                    ||'num_pat_ever_severe_before_adm,num_pat_ever_severe_since_adm' s
+                    ||'num_patients_all_before_admission,num_patients_all_since_admission,'
+                    ||'num_patients_ever_severe_before_admission,num_patients_ever_severe_since_admission' s
+                from dual    
                 union all 
                 select row_number() over (order by num_pat_all_since_admission desc, num_pat_all_before_admission desc) i,
                     siteid
@@ -1147,8 +1151,9 @@ begin
         select s MedicationsCSV
             from (
                 select 0 i, 'siteid,med_class,'
-                    ||'num_pat_all_before_admission,num_pat_all_since_admission,'
-                    ||'num_pat_ever_severe_before_adm,num_pat_ever_severe_since_adm' s
+                    ||'num_patients_all_before_admission,num_patients_all_since_admission,'
+                    ||'num_patients_ever_severe_before_admission,num_patients_ever_severe_since_admission' s
+                from dual    
                 union all 
                 select row_number() over (order by num_pat_all_since_admission desc, num_pat_all_before_admission desc) i,
                     siteid
