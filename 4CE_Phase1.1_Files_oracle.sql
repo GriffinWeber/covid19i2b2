@@ -673,9 +673,9 @@ insert into covid_clinical_course
 			c.patient_num, severe
 		from covid_date_list_temp d
 			inner join covid_admissions p
-				on p.admission_date<=d.d and p.discharge_date>=d.d
+				on trunc(p.admission_date)<=trunc(d.d) and trunc(p.discharge_date)>=trunc(d.d)
 			inner join covid_cohort c
-				on p.patient_num=c.patient_num and p.admission_date>=c.admission_date
+				on p.patient_num=c.patient_num and trunc(p.admission_date)>=trunc(c.admission_date)
 	) t
 	group by days_since_admission
 ;commit;    
