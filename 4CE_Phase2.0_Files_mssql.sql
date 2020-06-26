@@ -1,6 +1,6 @@
 --##############################################################################
 --### 4CE Phase 2.0
---### Date: June 12, 2020
+--### Date: June 26, 2020
 --### Database: Microsoft SQL Server
 --### Data Model: i2b2
 --### Created By: Griffin Weber (weber@hms.harvard.edu)
@@ -177,12 +177,12 @@ insert into #PatientObservations (siteid, patient_num, days_since_admission, con
 	where days_since_admission<=-15 or days_since_admission>=0
 	group by patient_num, since_admission, icd_code_3chars
 
--- Procedures (ICD9) each day since COVID
+-- Procedures (ICD9) each day since COVID (only procedures used in 4CE Phase 1.1 to determine severity)
 insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
 	select distinct '', p.patient_num,
 		datediff(dd,p.admission_date,cast(f.start_date as date)),
 		'PROC-ICD9',
-		left(substring(f.concept_cd, len(code_prefix_icd9proc)+1, 999), 3) icd_code_3chars,
+		substring(f.concept_cd, len(code_prefix_icd9proc)+1, 999),
 		-999
  	from #config x
 		cross join crc.observation_fact f
@@ -190,13 +190,19 @@ insert into #PatientObservations (siteid, patient_num, days_since_admission, con
 			on f.patient_num=p.patient_num 
 				and f.start_date >= p.admission_date
 	where concept_cd like code_prefix_icd9proc+'%' and code_prefix_icd9proc<>''
+		and (
+			-- Insertion of endotracheal tube
+			f.concept_cd = x.code_prefix_icd9proc+'96.04'
+			-- Invasive mechanical ventilation
+			or f.concept_cd like x.code_prefix_icd9proc+'96.7[012]'
+		)
 
--- Procedures (ICD10) each day since COVID
+-- Procedures (ICD10) each day since COVID (only procedures used in 4CE Phase 1.1 to determine severity)
 insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
 	select distinct '', p.patient_num,
 		datediff(dd,p.admission_date,cast(f.start_date as date)),
 		'PROC-ICD10',
-		left(substring(f.concept_cd, len(code_prefix_icd10pcs)+1, 999), 3) icd_code_3chars,
+		substring(f.concept_cd, len(code_prefix_icd10pcs)+1, 999),
 		-999
  	from #config x
 		cross join crc.observation_fact f
@@ -204,6 +210,12 @@ insert into #PatientObservations (siteid, patient_num, days_since_admission, con
 			on f.patient_num=p.patient_num 
 				and f.start_date >= p.admission_date
 	where concept_cd like code_prefix_icd10pcs+'%' and code_prefix_icd10pcs<>''
+		and (
+			-- Insertion of endotracheal tube
+			f.concept_cd = x.code_prefix_icd10pcs+'0BH17EZ'
+			-- Invasive mechanical ventilation
+			or f.concept_cd like x.code_prefix_icd10pcs+'5A09[345]%'
+		)
 
 -- Medications (Med Class) before and after COVID
 insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
