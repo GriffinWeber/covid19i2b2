@@ -1,6 +1,6 @@
 --##############################################################################
 --### 4CE Phase 2.0
---### Date: June 26, 2020
+--### Date: July 24, 2020
 --### Database: Microsoft SQL Server
 --### Data Model: i2b2
 --### Created By: Griffin Weber (weber@hms.harvard.edu)
@@ -46,7 +46,7 @@ insert into #config2
 -- Patient Summary: Dates, Outcomes, and Demographics
 --------------------------------------------------------------------------------
 
-create table #PatientSummary (
+create table #LocalPatientSummary (
 	siteid varchar(50) not null,
 	patient_num int not null,
 	admission_date date not null,
@@ -63,9 +63,9 @@ create table #PatientSummary (
 	race_collected int not null
 )
 
-alter table #PatientSummary add primary key (patient_num)
+alter table #LocalPatientSummary add primary key (patient_num)
 
-insert into #PatientSummary (siteid, patient_num, admission_date, days_since_admission, last_discharge_date, still_in_hospital, severe_date, severe, death_date, deceased, sex, age_group, race, race_collected)
+insert into #LocalPatientSummary (siteid, patient_num, admission_date, days_since_admission, last_discharge_date, still_in_hospital, severe_date, severe, death_date, deceased, sex, age_group, race, race_collected)
 	select '', c.patient_num, c.admission_date, 
 		datediff(dd,c.admission_date,GetDate()),
 		(case when a.last_discharge_date = cast(GetDate() as date) then '1/1/1900' else a.last_discharge_date end),
@@ -98,7 +98,7 @@ insert into #PatientSummary (siteid, patient_num, admission_date, days_since_adm
 -- Patient Clinical Course: Status by Number of Days Since Admission
 --------------------------------------------------------------------------------
 
-create table #PatientClinicalCourse (
+create table #LocalPatientClinicalCourse (
 	siteid varchar(50) not null,
 	patient_num int not null,
 	days_since_admission int not null,
@@ -108,29 +108,30 @@ create table #PatientClinicalCourse (
 	deceased int not null
 )
 
-alter table #PatientClinicalCourse add primary key (patient_num, days_since_admission)
+alter table #LocalPatientClinicalCourse add primary key (patient_num, days_since_admission)
 
-insert into #PatientClinicalCourse (siteid, patient_num, days_since_admission, calendar_date, in_hospital, severe, deceased)
-	select distinct '', p.patient_num, 
+insert into #LocalPatientClinicalCourse (siteid, patient_num, days_since_admission, calendar_date, in_hospital, severe, deceased)
+	select '', p.patient_num, 
 		datediff(dd,p.admission_date,d.d) days_since_admission,
 		d.d calendar_date,
-		(case when a.patient_num is not null then 1 else 0 end) in_hospital,
-		(case when p.severe=1 and d.d>=p.severe_date then 1 else 0 end) severe,
-		(case when p.deceased=1 and d.d>=p.death_date then 1 else 0 end) deceased
-	from #PatientSummary p
+		max(case when a.patient_num is not null then 1 else 0 end) in_hospital,
+		max(case when p.severe=1 and d.d>=p.severe_date then 1 else 0 end) severe,
+		max(case when p.deceased=1 and d.d>=p.death_date then 1 else 0 end) deceased
+	from #LocalPatientSummary p
 		inner join #date_list d
-			on d.d>=p.admission_date and d.d<=p.last_discharge_date
+			on d.d>=p.admission_date
 		left outer join #admissions a
 			on a.patient_num=p.patient_num 
 				and a.admission_date>=p.admission_date 
 				and a.admission_date<=d.d 
 				and a.discharge_date>=d.d
+	group by p.patient_num, p.admission_date, d.d
 
 --------------------------------------------------------------------------------
 -- Patient Observations: Selected Data Facts
 --------------------------------------------------------------------------------
 
-create table #PatientObservations (
+create table #LocalPatientObservations (
 	siteid varchar(50) not null,
 	patient_num int not null,
 	days_since_admission int not null,
@@ -139,53 +140,82 @@ create table #PatientObservations (
 	value numeric(18,5) not null
 )
 
-alter table #PatientObservations add primary key (patient_num, concept_type, concept_code, days_since_admission)
+alter table #LocalPatientObservations add primary key (patient_num, concept_type, concept_code, days_since_admission)
 
--- Diagnoses (ICD9) before and after COVID
-insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
-	select '', patient_num, min(days_since_admission), 'DIAG-ICD9', icd_code_3chars, -999
-	from (
-		select p.patient_num,
-			left(substring(f.concept_cd, len(code_prefix_icd9cm)+1, 999), 3) icd_code_3chars,
-			(case when f.start_date>=p.admission_date then 1 else 0 end) since_admission,
-			datediff(dd,p.admission_date,cast(f.start_date as date)) days_since_admission
- 		from #config x
-			cross join crc.observation_fact f
-			inner join #covid_cohort p 
-				on f.patient_num=p.patient_num 
-					and f.start_date >= dateadd(dd,-365,p.admission_date)
-		where concept_cd like code_prefix_icd9cm+'%' and code_prefix_icd9cm<>''
-	) t
-	where days_since_admission<=-15 or days_since_admission>=0
-	group by patient_num, since_admission, icd_code_3chars
+-- Diagnoses (3 character ICD9 codes) since 365 days before COVID
+insert into #LocalPatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
+	select distinct '',
+		p.patient_num,
+		datediff(dd,p.admission_date,cast(f.start_date as date)),
+		'DIAG-ICD9',
+		left(substring(f.concept_cd, len(code_prefix_icd9cm)+1, 999), 3),
+		-999
+ 	from #config x
+		cross join observation_fact f
+		inner join #covid_cohort p 
+			on f.patient_num=p.patient_num 
+				and f.start_date >= dateadd(dd,-365,p.admission_date)
+	where concept_cd like code_prefix_icd9cm+'%' and code_prefix_icd9cm<>''
 
--- Diagnoses (ICD10) before and after COVID
-insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
-	select '', patient_num, min(days_since_admission), 'DIAG-ICD10', icd_code_3chars, -999
-	from (
-		select p.patient_num,
-			left(substring(f.concept_cd, len(code_prefix_icd10cm)+1, 999), 3) icd_code_3chars,
-			(case when f.start_date>=p.admission_date then 1 else 0 end) since_admission,
-			datediff(dd,p.admission_date,cast(f.start_date as date)) days_since_admission
- 		from #config x
-			cross join crc.observation_fact f
-			inner join #covid_cohort p 
-				on f.patient_num=p.patient_num 
-					and f.start_date >= dateadd(dd,-365,p.admission_date)
-		where concept_cd like code_prefix_icd10cm+'%' and code_prefix_icd10cm<>''
-	) t
-	where days_since_admission<=-15 or days_since_admission>=0
-	group by patient_num, since_admission, icd_code_3chars
+-- Diagnoses (3 character ICD10 codes) since 365 days before COVID
+insert into #LocalPatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
+	select distinct '',
+		p.patient_num,
+		datediff(dd,p.admission_date,cast(f.start_date as date)),
+		'DIAG-ICD10',
+		left(substring(f.concept_cd, len(code_prefix_icd10cm)+1, 999), 3),
+		-999
+ 	from #config x
+		cross join observation_fact f
+		inner join #covid_cohort p 
+			on f.patient_num=p.patient_num 
+				and f.start_date >= dateadd(dd,-365,p.admission_date)
+	where concept_cd like code_prefix_icd10cm+'%' and code_prefix_icd10cm<>''
+
+-- Medications (Med Class) since 365 days before COVID
+insert into #LocalPatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
+	select distinct '',
+		p.patient_num,
+		datediff(dd,p.admission_date,cast(f.start_date as date)),
+		'MED-CLASS',
+		m.med_class,	
+		-999
+	from observation_fact f
+		inner join #covid_cohort p 
+			on f.patient_num=p.patient_num 
+				and f.start_date >= dateadd(dd,-365,p.admission_date)
+		inner join #med_map m
+			on f.concept_cd = m.local_med_code
+
+-- Labs (LOINC) since 60 days (two months) before COVID
+insert into #LocalPatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
+	select '', 
+		f.patient_num,
+		datediff(dd,p.admission_date,f.start_date),
+		'LAB-LOINC',		
+		l.loinc,
+		avg(f.nval_num*l.scale_factor)
+	from observation_fact f
+		inner join #covid_cohort p 
+			on f.patient_num=p.patient_num
+		inner join #lab_map l
+			on f.concept_cd=l.local_lab_code
+	where l.local_lab_code is not null
+		and f.nval_num is not null
+		and f.nval_num >= 0
+		and f.start_date >= dateadd(dd,-60,p.admission_date)
+	group by f.patient_num, datediff(dd,p.admission_date,f.start_date), l.loinc
 
 -- Procedures (ICD9) each day since COVID (only procedures used in 4CE Phase 1.1 to determine severity)
-insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
-	select distinct '', p.patient_num,
+insert into #LocalPatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
+	select distinct '', 
+		p.patient_num,
 		datediff(dd,p.admission_date,cast(f.start_date as date)),
 		'PROC-ICD9',
 		substring(f.concept_cd, len(code_prefix_icd9proc)+1, 999),
 		-999
  	from #config x
-		cross join crc.observation_fact f
+		cross join observation_fact f
 		inner join #covid_cohort p 
 			on f.patient_num=p.patient_num 
 				and f.start_date >= p.admission_date
@@ -198,14 +228,15 @@ insert into #PatientObservations (siteid, patient_num, days_since_admission, con
 		)
 
 -- Procedures (ICD10) each day since COVID (only procedures used in 4CE Phase 1.1 to determine severity)
-insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
-	select distinct '', p.patient_num,
+insert into #LocalPatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
+	select distinct '', 
+		p.patient_num,
 		datediff(dd,p.admission_date,cast(f.start_date as date)),
 		'PROC-ICD10',
 		substring(f.concept_cd, len(code_prefix_icd10pcs)+1, 999),
 		-999
  	from #config x
-		cross join crc.observation_fact f
+		cross join observation_fact f
 		inner join #covid_cohort p 
 			on f.patient_num=p.patient_num 
 				and f.start_date >= p.admission_date
@@ -216,41 +247,6 @@ insert into #PatientObservations (siteid, patient_num, days_since_admission, con
 			-- Invasive mechanical ventilation
 			or f.concept_cd like x.code_prefix_icd10pcs+'5A09[345]%'
 		)
-
--- Medications (Med Class) before and after COVID
-insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
-	select '', patient_num, min(days_since_admission), 'MED-CLASS', med_class concept, -999
-	from (
-		select p.patient_num, m.med_class,	
-			(case when f.start_date>=p.admission_date then 1 else 0 end) since_admission,
-			datediff(dd,p.admission_date,cast(f.start_date as date)) days_since_admission
-		from crc.observation_fact f
-			inner join #covid_cohort p 
-				on f.patient_num=p.patient_num 
-					and f.start_date >= dateadd(dd,-365,p.admission_date)
-			inner join #med_map m
-				on f.concept_cd = m.local_med_code
-	) t
-	where days_since_admission<=-15 or days_since_admission>=0
-	group by patient_num, since_admission, med_class
-
--- Labs (LOINC) each day since COVID
-insert into #PatientObservations (siteid, patient_num, days_since_admission, concept_type, concept_code, value)
-	select '', f.patient_num,
-		datediff(dd,p.admission_date,f.start_date),
-		'LAB-LOINC',		
-		l.loinc,
-		avg(f.nval_num*l.scale_factor)
-	from crc.observation_fact f
-		inner join #covid_cohort p 
-			on f.patient_num=p.patient_num
-		inner join #lab_map l
-			on f.concept_cd=l.local_lab_code
-	where l.local_lab_code is not null
-		and f.nval_num is not null
-		and f.nval_num >= 0
-		and f.start_date >= p.admission_date
-	group by f.patient_num, datediff(dd,p.admission_date,f.start_date), l.loinc
 
 
 --******************************************************************************
@@ -263,46 +259,46 @@ insert into #PatientObservations (siteid, patient_num, days_since_admission, con
 -- Replace the patient_num with a random study_num integer
 --------------------------------------------------------------------------------
 
-create table #PatientMapping (
+create table #LocalPatientMapping (
 	siteid varchar(50) not null,
 	patient_num int not null,
 	study_num int not null
 )
 
-alter table #PatientMapping add primary key (patient_num, study_num)
+alter table #LocalPatientMapping add primary key (patient_num, study_num)
 
 if exists (select * from #config2 where replace_patient_num = 1)
 begin
-	insert into #PatientMapping (siteid, patient_num, study_num)
+	insert into #LocalPatientMapping (siteid, patient_num, study_num)
 		select '', patient_num, row_number() over (order by newid()) 
-		from #PatientSummary
+		from #LocalPatientSummary
 	update t 
 		set t.patient_num = m.study_num 
-		from #PatientSummary t 
-			inner join #PatientMapping m on t.patient_num = m.patient_num
+		from #LocalPatientSummary t 
+			inner join #LocalPatientMapping m on t.patient_num = m.patient_num
 	update t 
 		set t.patient_num = m.study_num 
-		from #PatientClinicalCourse t 
-			inner join #PatientMapping m on t.patient_num = m.patient_num
+		from #LocalPatientClinicalCourse t 
+			inner join #LocalPatientMapping m on t.patient_num = m.patient_num
 	update t 
 		set t.patient_num = m.study_num 
-		from #PatientObservations t 
-			inner join #PatientMapping m on t.patient_num = m.patient_num
+		from #LocalPatientObservations t 
+			inner join #LocalPatientMapping m on t.patient_num = m.patient_num
 end
 else
 begin
-	insert into #PatientMapping (siteid, patient_num, study_num)
+	insert into #LocalPatientMapping (siteid, patient_num, study_num)
 		select '', patient_num, patient_num
-		from #PatientSummary
+		from #LocalPatientSummary
 end
 
 --------------------------------------------------------------------------------
 -- Set the siteid to a unique value for your institution.
 --------------------------------------------------------------------------------
-update #PatientSummary set siteid = (select siteid from #config)
-update #PatientClinicalCourse set siteid = (select siteid from #config)
-update #PatientObservations set siteid = (select siteid from #config)
-update #PatientMapping set siteid = (select siteid from #config)
+update #LocalPatientSummary set siteid = (select siteid from #config)
+update #LocalPatientClinicalCourse set siteid = (select siteid from #config)
+update #LocalPatientObservations set siteid = (select siteid from #config)
+update #LocalPatientMapping set siteid = (select siteid from #config)
 
 
 --******************************************************************************
@@ -332,14 +328,14 @@ begin
 			drop table '+save_as_prefix+'Diagnoses;
 		if (select object_id('''+save_as_prefix+'Medications'', ''U'') from #config2) is not null
 			drop table '+save_as_prefix+'Medications;
-		if (select object_id('''+save_as_prefix+'PatientMapping'', ''U'') from #config2) is not null
-			drop table '+save_as_prefix+'PatientMapping;
-		if (select object_id('''+save_as_prefix+'PatientSummary'', ''U'') from #config2) is not null
-			drop table '+save_as_prefix+'PatientSummary;
-		if (select object_id('''+save_as_prefix+'PatientClinicalCourse'', ''U'') from #config2) is not null
-			drop table '+save_as_prefix+'PatientClinicalCourse;
-		if (select object_id('''+save_as_prefix+'PatientObservations'', ''U'') from #config2) is not null
-			drop table '+save_as_prefix+'PatientObservations;
+		if (select object_id('''+save_as_prefix+'LocalPatientMapping'', ''U'') from #config2) is not null
+			drop table '+save_as_prefix+'LocalPatientMapping;
+		if (select object_id('''+save_as_prefix+'LocalPatientSummary'', ''U'') from #config2) is not null
+			drop table '+save_as_prefix+'LocalPatientSummary;
+		if (select object_id('''+save_as_prefix+'LocalPatientClinicalCourse'', ''U'') from #config2) is not null
+			drop table '+save_as_prefix+'LocalPatientClinicalCourse;
+		if (select object_id('''+save_as_prefix+'LocalPatientObservations'', ''U'') from #config2) is not null
+			drop table '+save_as_prefix+'LocalPatientObservations;
 		'
 		from #config2
 	exec sp_executesql @SaveAsTablesSQL
@@ -350,10 +346,10 @@ begin
 		select * into '+save_as_prefix+'Labs from #Labs;
 		select * into '+save_as_prefix+'Diagnoses from #Diagnoses;
 		select * into '+save_as_prefix+'Medications from #Medications;
-		select * into '+save_as_prefix+'PatientMapping from #PatientMapping;
-		select * into '+save_as_prefix+'PatientSummary from #PatientSummary;
-		select * into '+save_as_prefix+'PatientClinicalCourse from #PatientClinicalCourse;
-		select * into '+save_as_prefix+'PatientObservations from #PatientObservations;
+		select * into '+save_as_prefix+'LocalPatientMapping from #LocalPatientMapping;
+		select * into '+save_as_prefix+'LocalPatientSummary from #LocalPatientSummary;
+		select * into '+save_as_prefix+'LocalPatientClinicalCourse from #LocalPatientClinicalCourse;
+		select * into '+save_as_prefix+'LocalPatientObservations from #LocalPatientObservations;
 		'
 		from #config2
 	exec sp_executesql @SaveAsTablesSQL
@@ -366,10 +362,10 @@ end
 --------------------------------------------------------------------------------
 if exists (select * from #config2 where output_as_columns = 1)
 begin
-	select * from #PatientSummary order by admission_date, patient_num
-	select * from #PatientClinicalCourse order by patient_num, days_since_admission
-	select * from #PatientObservations order by patient_num, concept_type, concept_code, days_since_admission
-	select * from #PatientMapping order by patient_num
+	select * from #LocalPatientSummary order by admission_date, patient_num
+	select * from #LocalPatientClinicalCourse order by patient_num, days_since_admission
+	select * from #LocalPatientObservations order by patient_num, concept_type, concept_code, days_since_admission
+	select * from #LocalPatientMapping order by patient_num
 end
 
 --------------------------------------------------------------------------------
@@ -380,8 +376,8 @@ end
 if exists (select * from #config2 where output_as_csv = 1)
 begin
 
-	-- PatientSummary
-	select s PatientSummaryCSV
+	-- LocalPatientSummary
+	select s LocalPatientSummaryCSV
 		from (
 			select 0 i, 'patient_num,admission_date,days_since_admission,last_discharge_date,still_in_hospital,'
 				+'severe_date,severe,death_date,deceased,sex,age_group,race,race_collected' s
@@ -400,13 +396,13 @@ begin
 				+','+cast(age_group as varchar(50))
 				+','+cast(race as varchar(50))
 				+','+cast(race_collected as varchar(50))
-			from #PatientSummary
+			from #LocalPatientSummary
 			union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 		) t
 		order by i
 
-	-- PatientSummary
-	select s PatientClinicalCourseCSV
+	-- LocalPatientSummary
+	select s LocalPatientClinicalCourseCSV
 		from (
 			select 0 i, 'patient_num,days_since_admission,calendar_date,in_hospital,severe,deceased' s
 			union all 
@@ -417,14 +413,13 @@ begin
 				+','+cast(in_hospital as varchar(50))
 				+','+cast(severe as varchar(50))
 				+','+cast(deceased as varchar(50))
-			from #PatientClinicalCourse
+			from #LocalPatientClinicalCourse
 			union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 		) t
 		order by i
 
-
-	-- PatientObservations
-	select s PatientObservationsCSV
+	-- LocalPatientObservations
+	select s LocalPatientObservationsCSV
 		from (
 			select 0 i, 'patient_num,days_since_admission,concept_type,concept_code,value' s
 			union all 
@@ -434,20 +429,20 @@ begin
 				+','+cast(concept_type as varchar(50))
 				+','+cast(concept_code as varchar(50))
 				+','+cast(value as varchar(50))
-			from #PatientObservations
+			from #LocalPatientObservations
 			union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 		) t
 		order by i
 
-	-- PatientMapping
-	select s PatientMappingCSV
+	-- LocalPatientMapping
+	select s LocalPatientMappingCSV
 		from (
 			select 0 i, 'patient_num,study_num' s
 			union all 
 			select row_number() over (order by patient_num) i,
 				cast(patient_num as varchar(50))
 				+','+cast(study_num as varchar(50))
-			from #PatientMapping
+			from #LocalPatientMapping
 			union all select 9999999, '' --Add a blank row to make sure the last line in the file with data ends with a line feed.
 		) t
 		order by i
